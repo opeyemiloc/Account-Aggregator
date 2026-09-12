@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+dbvenv/
+
+# Data files (keep the directory structure via .gitkeep)
+data/*.csv
+data/*.xlsx
+data/*.xls
+!data/.gitkeep
+
+# Streamlit
+.streamlit/secrets.toml
+
+# OS Files
+.DS_Store
+Thumbs.db
