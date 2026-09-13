@@ -33,7 +33,24 @@ nav_options = [
     "3. Data Configuration", 
     "4. Run & Results"
 ]
-page = st.sidebar.radio("Go to", nav_options)
+
+if 'page' not in st.session_state:
+    st.session_state.page = nav_options[0]
+
+def nav_to(page_name):
+    st.session_state.page = page_name
+
+for nav_option in nav_options:
+    button_type = "primary" if st.session_state.page == nav_option else "secondary"
+    st.sidebar.button(
+        nav_option, 
+        use_container_width=True, 
+        type=button_type, 
+        on_click=nav_to, 
+        args=(nav_option,)
+    )
+
+page = st.session_state.page
 
 # --- PAGE 1: UPLOAD DATA ---
 if page == "1. Upload Data":
