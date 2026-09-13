@@ -11,8 +11,9 @@ def normalize_company_name(name: str) -> str:
     # 1. Convert to uppercase
     clean_name = name.upper()
     
-    # 2. Standardize " AND " to " & "
-    clean_name = clean_name.replace(" AND ", " & ")
+    # 2. Remove " AND " and "&" entirely to normalize A&B, A AND B, and A B to just A B
+    clean_name = clean_name.replace(" AND ", " ")
+    clean_name = clean_name.replace("&", " ")
     
     # 3. Remove punctuation
     # Replaces everything that isn't an alphanumeric character, space, or ampersand with a space
