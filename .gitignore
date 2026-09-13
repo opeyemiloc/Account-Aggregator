@@ -26,3 +26,9 @@ data/*.xls
 # OS Files
 .DS_Store
 Thumbs.db
+
+# Excluded by User
+executiondbplan.md
+AI_PAIRING_INSTRUCTIONS.md
+*.xlsx
+test_pipeline.py
