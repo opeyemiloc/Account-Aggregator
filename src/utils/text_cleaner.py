@@ -28,8 +28,9 @@ def normalize_company_name(name: str) -> str:
         r'\bINC\b', r'\bINCORPORATED\b',
         r'\bLLC\b', r'\bCORP\b', r'\bCORPORATION\b',
         r'\bNIGERIA\b', r'\bNIG\b',
-        r'\bENTERPRISES\b', r'\bENT\b',
+        r'\bENTERPRISES\b', r'\bENTERPRISE\b', r'\bENT\b',
         r'\bCOMPANY\b', r'\bCO\b',
+        r'\bMANUFACTURING\b', r'\bMFG\b',
         r'\bVENTURES\b', r'\bGLOBAL\b', r'\bINTL\b', r'\bINTERNATIONAL\b'
     ]
     
