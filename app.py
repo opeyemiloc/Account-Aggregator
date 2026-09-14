@@ -183,10 +183,28 @@ elif page == "4. Run & Results":
                     pending_llm = pd.DataFrame()
                     manual_review = pd.DataFrame()
                     
+                # 5. LLM Resolution
+                status_text.text("Step 5/5: Running LLM Resolution on ambiguous records...")
+                if not pending_llm.empty:
+                    if st.session_state.get('gemini_api_key'):
+                        ai_matches, manual_fallback = resolve_with_gemini(pending_llm, st.session_state.gemini_api_key)
+                        manual_review = pd.concat([manual_review, manual_fallback], ignore_index=True)
+                        # If LLM processed them, the pending bucket is now empty
+                        pending_llm = pd.DataFrame() 
+                    else:
+                        st.warning("No Gemini API Key provided. Skipping LLM resolution.")
+                        ai_matches = pd.DataFrame()
+                        # We do NOT merge pending_llm into manual_review so they stay in their own bucket!
+                else:
+                    ai_matches = pd.DataFrame()
+                    
+                progress_bar.progress(100)
+                
                 # Save to state
                 st.session_state.single = single_match_df
                 st.session_state.multi = multi_match_df
                 st.session_state.pending = pending_llm
+                st.session_state.ai_matches = ai_matches
                 st.session_state.manual = manual_review
                 st.session_state.processed = True
                 
@@ -202,8 +220,9 @@ elif page == "4. Run & Results":
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 st.session_state.single.to_excel(writer, sheet_name="1_Single_Matches", index=False)
                 st.session_state.pending.to_excel(writer, sheet_name="2_Pending_LLM", index=False)
-                st.session_state.manual.to_excel(writer, sheet_name="3_Manual_Review", index=False)
-                st.session_state.multi.to_excel(writer, sheet_name="4_Multi_Parent_Conflicts", index=False)
+                st.session_state.ai_matches.to_excel(writer, sheet_name="3_AI_Matches", index=False)
+                st.session_state.manual.to_excel(writer, sheet_name="4_Manual_Review", index=False)
+                st.session_state.multi.to_excel(writer, sheet_name="5_Multi_Parent_Conflicts", index=False)
             
             # Prominent Download Button above preview
             st.download_button(
@@ -218,19 +237,25 @@ elif page == "4. Run & Results":
             
             # --- Analytics ---
             st.subheader("Pipeline Analytics")
-            c1, c2, c3, c4 = st.columns(4)
+            c1, c2, c3, c4, c5 = st.columns(5)
             c1.metric("Single Matches", len(st.session_state.single))
             c2.metric("Multi-Parent Conflicts", len(st.session_state.multi))
             c3.metric("Pending LLM", len(st.session_state.pending))
-            c4.metric("Manual Review / Rejected", len(st.session_state.manual))
+            c4.metric("AI Matches", len(st.session_state.ai_matches))
+            c5.metric("Manual Review / Rejected", len(st.session_state.manual))
             
             # --- Interactive Preview ---
-            st.subheader("Results Preview (Multi-Parent Conflicts)")
-            if not st.session_state.multi.empty:
-                display_df = st.session_state.multi
-                if len(display_df) > 30:
-                    st.info(f"⚠️ Found {len(display_df)} total conflicts. Showing the first 30 rows to preserve performance. Please download the Excel report to see all results.")
-                    display_df = display_df.head(30)
-                st.dataframe(display_df, use_container_width=True)
-            else:
-                st.info("No multi-parent conflicts found! All exact matches were clean 1-to-1 mappings.")
+            st.subheader("Results Preview (Pending LLM & Conflicts)")
+            colA, colB = st.columns(2)
+            with colA:
+                st.markdown("**Pending LLM Review**")
+                if not st.session_state.pending.empty:
+                    st.dataframe(st.session_state.pending.head(30), use_container_width=True)
+                else:
+                    st.info("No ambiguous records pending review.")
+            with colB:
+                st.markdown("**Multi-Parent Conflicts**")
+                if not st.session_state.multi.empty:
+                    st.dataframe(st.session_state.multi.head(30), use_container_width=True)
+                else:
+                    st.info("No multi-parent conflicts found.")
