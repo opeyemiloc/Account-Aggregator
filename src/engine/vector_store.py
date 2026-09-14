@@ -87,3 +87,92 @@ class VectorMatcher:
             results.append(row_data)
 
         return pd.DataFrame(results)
+
+    def search_fuzzy_conflicts(self, exact_matches_df: pd.DataFrame, base_name_col: str, similarity_threshold: float = 0.85) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """
+        Takes the Single Matches and runs them against the vector DB to find if there is a SECOND 
+        highly similar canonical name, indicating a fuzzy conflict.
+        Returns (clean_single_matches, fuzzy_conflicts).
+        """
+        if exact_matches_df.empty or self.corpus_embeddings is None:
+            return exact_matches_df, pd.DataFrame()
+            
+        queries = exact_matches_df['Normalized Name'].tolist()
+        query_embeddings = self.model.encode(queries, convert_to_tensor=True)
+        search_results = util.semantic_search(query_embeddings, self.corpus_embeddings, top_k=3)
+        
+        clean_singles = []
+        fuzzy_conflicts = []
+        
+        for i, (idx, row) in enumerate(exact_matches_df.iterrows()):
+            row_data = row.to_dict()
+            matched_canonical = row['Match 1']
+            
+            conflicts = []
+            for hit in search_results[i]:
+                corpus_id = int(hit['corpus_id'])
+                score = hit['score']
+                candidate_canonical = self.canonical_names[corpus_id]
+                
+                # If we find a HIGHLY similar canonical name that is DIFFERENT from the one it exactly matched
+                if score >= similarity_threshold and candidate_canonical != matched_canonical:
+                    conflicts.append({
+                        'canonical_name': candidate_canonical,
+                        'normalized_name': self.base_names[corpus_id],
+                        'score': float(score)
+                    })
+            
+            if conflicts:
+                row_data['Status'] = 'Fuzzy Conflict'
+                row_data['Exact Match'] = matched_canonical
+                row_data['Fuzzy Alternatives'] = conflicts
+                fuzzy_conflicts.append(row_data)
+            else:
+                clean_singles.append(row_data)
+                
+        return pd.DataFrame(clean_singles), pd.DataFrame(fuzzy_conflicts)
+        
+    def find_base_duplicates(self, similarity_threshold: float = 0.85) -> pd.DataFrame:
+        """
+        Searches the base index against itself to find highly similar internal duplicates.
+        """
+        if self.corpus_embeddings is None or len(self.base_names) < 2:
+            return pd.DataFrame()
+            
+        # Search corpus against itself
+        search_results = util.semantic_search(self.corpus_embeddings, self.corpus_embeddings, top_k=5)
+        
+        duplicates = []
+        seen_pairs = set()
+        
+        for i, hits in enumerate(search_results):
+            name_a = self.canonical_names[i]
+            norm_a = self.base_names[i]
+            
+            for hit in hits:
+                j = int(hit['corpus_id'])
+                score = float(hit['score'])
+                
+                # Ignore exact same index or low scores
+                if i == j or score < similarity_threshold:
+                    continue
+                    
+                name_b = self.canonical_names[j]
+                
+                # Create a canonical pair tuple to avoid A->B and B->A duplicates
+                pair = tuple(sorted([name_a, name_b]))
+                if pair not in seen_pairs:
+                    seen_pairs.add(pair)
+                    duplicates.append({
+                        'Canonical Name A': name_a,
+                        'Normalized A': norm_a,
+                        'Canonical Name B': name_b,
+                        'Normalized B': self.base_names[j],
+                        'Similarity Score': score
+                    })
+                    
+        # Sort by highest similarity first
+        if duplicates:
+            df = pd.DataFrame(duplicates)
+            return df.sort_values(by='Similarity Score', ascending=False)
+        return pd.DataFrame()
