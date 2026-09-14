@@ -76,20 +76,25 @@ elif page == "2. Data Previews & Mapping":
     if st.session_state.base_file_bytes is None or st.session_state.messy_file_bytes is None:
         st.warning("Please upload both files in the 'Upload Data' tab first.")
     else:
-        # Helper to read excel from bytes efficiently
+        # Streamlit's cache_data cannot serialize a pd.ExcelFile object. 
+        # Instead, we cache the extraction of sheet names and the loading of the actual dataframe.
         @st.cache_data
-        def read_excel_file(file_bytes):
-            return pd.ExcelFile(io.BytesIO(file_bytes))
+        def get_sheet_names(file_bytes):
+            return pd.ExcelFile(io.BytesIO(file_bytes)).sheet_names
+            
+        @st.cache_data
+        def load_dataframe(file_bytes, sheet_name):
+            return pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_name)
 
-        base_xls = read_excel_file(st.session_state.base_file_bytes)
-        messy_xls = read_excel_file(st.session_state.messy_file_bytes)
+        base_sheets = get_sheet_names(st.session_state.base_file_bytes)
+        messy_sheets = get_sheet_names(st.session_state.messy_file_bytes)
         
         col1, col2 = st.columns(2)
         
         with col1:
             st.subheader("Base Roster Mapping")
-            base_sheet = st.selectbox(f"Select Sheet for Base Roster ({st.session_state.base_filename})", base_xls.sheet_names)
-            base_df = pd.read_excel(io.BytesIO(st.session_state.base_file_bytes), sheet_name=base_sheet)
+            base_sheet = st.selectbox(f"Select Sheet for Base Roster ({st.session_state.base_filename})", base_sheets)
+            base_df = load_dataframe(st.session_state.base_file_bytes, base_sheet)
             st.session_state.base_col = st.selectbox("Select Canonical Name Column", base_df.columns.tolist())
             
             st.markdown("**Preview:**")
@@ -99,8 +104,8 @@ elif page == "2. Data Previews & Mapping":
             
         with col2:
             st.subheader("Messy DB Mapping")
-            messy_sheet = st.selectbox(f"Select Sheet for Messy DB ({st.session_state.messy_filename})", messy_xls.sheet_names)
-            messy_df = pd.read_excel(io.BytesIO(st.session_state.messy_file_bytes), sheet_name=messy_sheet)
+            messy_sheet = st.selectbox(f"Select Sheet for Messy DB ({st.session_state.messy_filename})", messy_sheets)
+            messy_df = load_dataframe(st.session_state.messy_file_bytes, messy_sheet)
             st.session_state.messy_name_col = st.selectbox("Select Messy Name Column", messy_df.columns.tolist())
             st.session_state.officer_col = st.selectbox("Select Account Officer Column", messy_df.columns.tolist())
             
