@@ -1,27 +1,30 @@
 import re
 
-def normalize_company_name(name: str) -> str:
+def normalize_company_name(name: str) -> dict:
     """
-    Normalizes a company name for exact matching by standardizing formatting,
-    removing punctuation, and stripping common legal suffixes.
+    Normalizes a company name into three distinct formats for the deterministic funnel:
+    1. clean_name: Punctuation handled.
+    2. core_name: Corporate suffixes removed.
+    3. fingerprint: Whitespace removed.
     """
     if not isinstance(name, str) or not name.strip():
-        return ""
+        return {"clean_name": "", "core_name": "", "fingerprint": ""}
         
     # 1. Convert to uppercase
-    clean_name = name.upper()
+    raw_name = name.upper()
     
-    # 2. Remove " AND " and "&" entirely to normalize A&B, A AND B, and A B to just A B
-    clean_name = clean_name.replace(" AND ", " ")
-    clean_name = clean_name.replace("&", " ")
+    # --- CLEAN NAME ---
+    # Contractions rule: delete ', ", and ` so words fuse (INT'L -> INTL)
+    clean_name = re.sub(r'[\'"`]', '', raw_name)
     
-    # 3. Remove punctuation
-    # Replaces everything that isn't an alphanumeric character, space, or ampersand with a space
-    clean_name = re.sub(r'[^A-Z0-9\s&]', ' ', clean_name)
+    # Bridges rule: replace -, /, ., &, (, ) and other non-alphanumeric with a space
+    clean_name = re.sub(r'[^A-Z0-9]', ' ', clean_name)
     
-    # 4. Strip out common legal suffixes
-    # We use word boundaries \b to ensure we don't strip parts of actual words 
-    # (e.g., matching "LTD" but not "MELTDOWN")
+    # Trim extra whitespace
+    clean_name = re.sub(r'\s+', ' ', clean_name).strip()
+    
+    # --- CORE NAME ---
+    core_name = clean_name
     suffixes_to_remove = [
         r'\bLTD\b', r'\bLIMITED\b', 
         r'\bPLC\b', 
@@ -31,13 +34,20 @@ def normalize_company_name(name: str) -> str:
         r'\bENTERPRISES\b', r'\bENTERPRISE\b', r'\bENT\b',
         r'\bCOMPANY\b', r'\bCO\b',
         r'\bMANUFACTURING\b', r'\bMFG\b',
-        r'\bVENTURES\b', r'\bGLOBAL\b', r'\bINTL\b', r'\bINTERNATIONAL\b'
+        r'\bVENTURES\b', r'\bGLOBAL\b', r'\bINTL\b', r'\bINTERNATIONAL\b',
+        r'\bAUTO\b', r'\bAUTOS\b', r'\bMULTIPURPOSE\b', r'\bINDUSTRIES\b'
     ]
     
     for suffix in suffixes_to_remove:
-        clean_name = re.sub(suffix, '', clean_name)
+        core_name = re.sub(suffix, '', core_name)
         
-    # 5. Trim extra whitespace (including multiple spaces created by removing words/punctuation)
-    clean_name = re.sub(r'\s+', ' ', clean_name).strip()
+    core_name = re.sub(r'\s+', ' ', core_name).strip()
     
-    return clean_name
+    # --- FINGERPRINT ---
+    fingerprint = core_name.replace(" ", "")
+    
+    return {
+        "clean_name": clean_name,
+        "core_name": core_name,
+        "fingerprint": fingerprint
+    }
