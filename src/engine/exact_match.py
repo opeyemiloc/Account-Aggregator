@@ -2,7 +2,8 @@ import pandas as pd
 
 def perform_exact_match(messy_df: pd.DataFrame, base_roster_df: pd.DataFrame, base_name_col: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
-    Performs the progressive 5-pass deterministic funnel.
+    Performs the progressive 5-pass deterministic funnel exhaustively.
+    Collects all matching base canonicals for each messy record, preventing premature drops.
     Pivots multiple messy variations into MATCH 1, MATCH 2 columns.
     
     Returns:
@@ -31,69 +32,43 @@ def perform_exact_match(messy_df: pd.DataFrame, base_roster_df: pd.DataFrame, ba
     
     resolved_records = []
     unmatched_records = []
-    multi_parent_conflicts = []
 
     for _, row in messy_df.iterrows():
         clean_m = row['Clean Messy']
         core_m = row['Core Messy']
         fp_m = row['Fingerprint Messy']
         
-        matched_canonical = None
-        conflict = False
-        failure_reason = ""
+        matched_bases = set()
         
         # --- PASS 1: Direct Normalized Equality ---
         if clean_m in clean_to_base:
-            bases = clean_to_base[clean_m]
-            if len(bases) == 1:
-                matched_canonical = list(bases)[0]
-            else:
-                conflict = True
+            matched_bases.update(clean_to_base[clean_m])
 
         # --- PASS 2: Core Brand Match ---
-        if not matched_canonical and not conflict:
-            if core_m in core_to_base:
-                bases = core_to_base[core_m]
-                if len(bases) == 1:
-                    matched_canonical = list(bases)[0]
-                else:
-                    conflict = True
+        if core_m in core_to_base:
+            matched_bases.update(core_to_base[core_m])
 
         # --- PASS 3: Whitespace Fingerprint Match ---
-        if not matched_canonical and not conflict:
-            if fp_m in fingerprint_to_base:
-                bases = fingerprint_to_base[fp_m]
-                if len(bases) == 1:
-                    matched_canonical = list(bases)[0]
-                else:
-                    conflict = True
+        if fp_m in fingerprint_to_base:
+            matched_bases.update(fingerprint_to_base[fp_m])
 
         # --- PASS 4: Token-Set Containment ---
-        if not matched_canonical and not conflict:
-            m_tokens = set(core_m.split())
-            if len(m_tokens) >= 2:
-                containment_matches = set()
-                for b_core in unique_base_cores:
-                    b_tokens = set(b_core.split())
-                    if len(b_tokens) >= 2:
-                        if m_tokens.issubset(b_tokens) or b_tokens.issubset(m_tokens):
-                            containment_matches.update(core_to_base[b_core])
-                
-                if len(containment_matches) == 1:
-                    matched_canonical = list(containment_matches)[0]
-                elif len(containment_matches) > 1:
-                    conflict = True
+        m_tokens = set(core_m.split())
+        if len(m_tokens) >= 2:
+            for b_core in unique_base_cores:
+                b_tokens = set(b_core.split())
+                if len(b_tokens) >= 2:
+                    if m_tokens.issubset(b_tokens) or b_tokens.issubset(m_tokens):
+                        matched_bases.update(core_to_base[b_core])
 
         # --- PASS 5: Prefix Truncation ---
-        if not matched_canonical and not conflict:
-            m_tokens = core_m.split()
-            trunc_matches = set()
-            
+        m_tokens_list = core_m.split()
+        if len(m_tokens_list) > 0:
             for b_core in unique_base_cores:
-                b_tokens = b_core.split()
-                if len(m_tokens) == len(b_tokens) and len(m_tokens) > 0:
+                b_tokens_list = b_core.split()
+                if len(m_tokens_list) == len(b_tokens_list):
                     is_match = True
-                    for mt, bt in zip(m_tokens, b_tokens):
+                    for mt, bt in zip(m_tokens_list, b_tokens_list):
                         if mt == bt:
                             continue
                         if len(mt) > 7 and bt.startswith(mt):
@@ -104,56 +79,62 @@ def perform_exact_match(messy_df: pd.DataFrame, base_roster_df: pd.DataFrame, ba
                         break
                     
                     if is_match:
-                        trunc_matches.update(core_to_base[b_core])
-                        
-            if len(trunc_matches) == 1:
-                matched_canonical = list(trunc_matches)[0]
-            elif len(trunc_matches) > 1:
-                conflict = True
+                        matched_bases.update(core_to_base[b_core])
                 
         # --- Route the Record ---
-        row_dict = row.to_dict()
-        if conflict:
-            row_dict['Failure Reason'] = "Multi-Parent Conflict in Funnel"
-            multi_parent_conflicts.append(row_dict)
-        elif matched_canonical:
-            row_dict['Resolved Canonical'] = matched_canonical
-            resolved_records.append(row_dict)
+        if matched_bases:
+            for base in matched_bases:
+                row_dict = row.to_dict()
+                row_dict['Resolved Canonical'] = base
+                resolved_records.append(row_dict)
         else:
-            row_dict['Failure Reason'] = "Failed all 5 deterministic passes"
-            unmatched_records.append(row_dict)
+            unmatched_records.append(row.to_dict())
 
-    # Convert results back to dataframes
     unmatched_df = pd.DataFrame(unmatched_records)
-    # multi_parent_conflicts normally go to the end, but wait, the prompt says they go to Ambiguous Queue!
-    # I will add the conflicts to unmatched_df so they go to Vector Search/Review Queue
-    if multi_parent_conflicts:
-        unmatched_df = pd.concat([unmatched_df, pd.DataFrame(multi_parent_conflicts)], ignore_index=True)
-        
+    
     if not resolved_records:
         return pd.DataFrame(), pd.DataFrame(), unmatched_df
         
     resolved_df = pd.DataFrame(resolved_records)
     
-    # Pivot the matched records
-    pivot_data = resolved_df.groupby('Resolved Canonical')['Messy_With_Officer'].apply(list).reset_index()
+    # --- Pivot and Grouping ---
+    # Determine which messy roots mapped to >1 distinct canonical base
+    counts = resolved_df.groupby('Core Messy')['Resolved Canonical'].nunique()
+    multi_parent_cores = counts[counts > 1].index
+
+    # Group all officers/variations for a given messy root
+    pivot_data = resolved_df.groupby('Core Messy')['Messy_With_Officer'].apply(lambda x: list(set(x))).reset_index()
+    
+    # Rejoin with the canonical bases so each base gets a row with the full horizontal pivot
+    pivot_merged = pd.merge(
+        pivot_data, 
+        resolved_df[['Core Messy', 'Resolved Canonical']].drop_duplicates(), 
+        on='Core Messy', 
+        how='inner'
+    )
     
     # Expand list into MATCH 1, MATCH 2 columns
-    max_len = pivot_data['Messy_With_Officer'].apply(len).max()
+    max_len = pivot_merged['Messy_With_Officer'].apply(len).max()
     match_cols = [f'MATCH {i+1}' for i in range(max_len)]
     
-    expanded_matches = pd.DataFrame(pivot_data['Messy_With_Officer'].tolist(), columns=match_cols)
+    expanded_matches = pd.DataFrame(pivot_merged['Messy_With_Officer'].tolist(), columns=match_cols)
     
     final_matched = pd.concat([
-        pivot_data[['Resolved Canonical']],
+        pivot_merged[['Resolved Canonical', 'Core Messy']],
         expanded_matches
     ], axis=1)
     
-    final_matched.rename(columns={'Resolved Canonical': 'Base account db'}, inplace=True)
+    final_matched.rename(columns={
+        'Resolved Canonical': 'ORIGINAL NAME',
+        'Core Messy': 'BASE NAME'
+    }, inplace=True)
     
-    # In this new architecture, single matches are EVERYTHING that successfully survived the funnel 
-    # without hitting a multi-parent conflict.
-    single_match_df = final_matched
-    multi_match_df = pd.DataFrame() # We routed multi-parent conflicts to the unmatched queue as requested
+    # Split into Single Matches and Multi-Parent Conflicts
+    single_match_df = final_matched[~final_matched['BASE NAME'].isin(multi_parent_cores)].copy()
+    multi_match_df = final_matched[final_matched['BASE NAME'].isin(multi_parent_cores)].copy()
+    
+    # For multi_match_df, add a Failure Reason to clarify why it's here
+    if not multi_match_df.empty:
+        multi_match_df['Failure Reason'] = "Mapped to multiple bases via Relational Funnel"
     
     return single_match_df, multi_match_df, unmatched_df
