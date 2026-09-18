@@ -147,7 +147,7 @@ elif page == "3. Run & Results":
                 status_text.text("Step 3/3: Running Semantic Vector Retrieval for Ambiguous Queue...")
                 matcher = VectorMatcher()
                 matcher.build_index(norm_base_df, st.session_state.base_col)
-                ambiguous_queue_df = matcher.search_unmatched(unmatched_df, top_k=5)
+                ambiguous_queue_df = matcher.search_unmatched(unmatched_df, top_k=3)
                 progress_bar.progress(100)
                 
                 st.session_state.single = single_match_df
